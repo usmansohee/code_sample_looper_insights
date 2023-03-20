@@ -1,0 +1,161 @@
+# frozen_string_literal: true
+
+wb = xlsx_package.workbook
+
+columns = ['Date', 'Distributor', 'Platform', 'Region',
+           'Share of MPV', 'Total MPV', 'Total Number of Spots for Distributor',
+           'Total Number of Spots in Platform', '% Share of Voice',
+           'Total Number of Medium Range ATF Spots for Distributor',
+           'Total Number of Medium Range ATF Spots in Platform',
+           '% Medium Range ATF Spots',
+           'Total Number of True ATF Spots for Distributor', 'Total Number of True ATF Spots in Platform',
+           '% True ATF Spots']
+
+wb.add_worksheet(name: 'Share of Voice') do |sheet|
+  sheet.sheet_view.show_grid_lines = false
+
+  bold = sheet.styles.add_style(b: true)
+  percent = sheet.styles.add_style(b: true, format_code: '0.00%')
+  studios = sheet.styles.add_style(b: true, alignment: { vertical: :center })
+  sheet.add_row columns, style: bold
+
+  row_index = 2
+  @report.studios.each do |studio|
+    @report.platforms.each do |platform|
+      @report.territories.each do |territory|
+        if @report.metadata.slice(:atf, :search).values.all?(&:nil?)
+          scans = @report.scans.select { |scan| scan.platform == platform && scan.territory == territory }
+          spots_count = scans.sum { |scan| @report.studio_ids.sum { |s| scan.spots_count_for(Studio.new(id: s)) } }
+          next unless spots_count.positive?
+
+          all_spots_count = scans.sum(&:spots_count)
+          studio_spots_count = scans.sum { |scan| scan.spots_count_for(studio) }
+          matf_spots_count = scans.sum(&:medium_atf_spots_count)
+          matf_studio_spots_count = scans.sum { |scan| scan.medium_atf_spots_count_for(studio) }
+          tatf_spots_count = scans.sum(&:true_atf_spots_count)
+          tatf_studio_spots_count = scans.sum { |scan| scan.true_atf_spots_count_for(studio) }
+          total_mpv = scans.sum(&:mpv_total)
+          studio_mpv = scans.sum { |s| s.mpv_total_for(studio) }
+        else
+          spots = @report.spots_by_studio.select { |spot| spot.platform == platform && spot.territory == territory }
+          next unless spots.count.positive?
+
+          all_spots = @report.spots.select { |spot| spot.platform == platform && spot.territory == territory }
+          all_spots_count = all_spots.size
+
+          studio_spots_count = spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+          matf_spots = all_spots.select(&:medium_atf)
+          matf_spots_count = matf_spots.size
+          matf_studio_spots_count = matf_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+          tatf_spots = all_spots.select(&:true_atf)
+          tatf_spots_count = tatf_spots.size
+          tatf_studio_spots_count = tatf_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+          total_mpv = all_spots.sum(&:mpv)
+          studio_mpv = spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.sum(&:mpv)
+        end
+
+        sov = studio_spots_count.to_f / all_spots_count if studio_spots_count.positive?
+        matf_sov = matf_studio_spots_count.to_f / matf_spots_count if matf_studio_spots_count.positive?
+        tatf_sov = tatf_studio_spots_count.to_f / tatf_spots_count if tatf_studio_spots_count.positive?
+        share_of_mpv = studio_mpv / total_mpv if total_mpv.positive?
+
+        sheet.add_row ['', studio.name, platform.name, territory.name,
+                       share_of_mpv, total_mpv,
+                       studio_spots_count, all_spots_count, sov,
+                       matf_studio_spots_count, matf_spots_count, matf_sov,
+                       tatf_studio_spots_count, tatf_spots_count, tatf_sov]
+
+        row_index += 1
+
+        next unless @report.weeks.size > 1
+
+        @report.weeks.each do |week|
+          date = "From #{week.first.strftime('%e %b %y')} to #{week.last.strftime('%e %b %y')}"
+
+          if @report.metadata.slice(:atf, :search).values.all?(&:nil?)
+            week_scans = scans.select { |scan| week.cover?(scan.scan_date) }
+            week_spots_count = week_scans.sum do |scan|
+              @report.studio_ids.sum { |s| scan.spots_count_for(Studio.new(id: s)) }
+            end
+            next unless week_spots_count.positive?
+
+            all_week_spots_count = week_scans.sum(&:spots_count)
+            studio_spots_count = week_scans.sum { |scan| scan.spots_count_for(studio) }
+            matf_spots_count = week_scans.sum(&:medium_atf_spots_count)
+            matf_studio_spots_count = week_scans.sum { |scan| scan.medium_atf_spots_count_for(studio) }
+            tatf_spots_count = week_scans.sum(&:true_atf_spots_count)
+            tatf_studio_spots_count = week_scans.sum { |scan| scan.true_atf_spots_count_for(studio) }
+            total_mpv = week_scans.sum(&:mpv_total)
+            studio_mpv = week_scans.sum { |s| s.mpv_total_for(studio) }
+          else
+            week_spots = spots.select { |spot| week.cover?(spot.started_at) }
+            next unless week_spots.count.positive?
+
+            all_week_spots = all_spots.select { |spot| week.cover?(spot.started_at) }
+            all_week_spots_count = all_week_spots.size
+
+            studio_spots_count = week_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+            matf_spots = all_week_spots.select(&:medium_atf)
+            matf_spots_count = matf_spots.size
+            matf_studio_spots_count = matf_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+            tatf_spots = all_week_spots.select(&:true_atf)
+            tatf_spots_count = tatf_spots.size
+            tatf_studio_spots_count = tatf_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.size
+
+            total_mpv = all_week_spots.sum(&:mpv)
+            studio_mpv = week_spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.sum(&:mpv)
+          end
+
+          sov = studio_spots_count.to_f / all_week_spots_count if studio_spots_count.positive?
+          matf_sov = matf_studio_spots_count.to_f / matf_spots_count if matf_studio_spots_count.positive?
+          tatf_sov = tatf_studio_spots_count.to_f / tatf_spots_count if tatf_studio_spots_count.positive?
+          share_of_mpv = studio_mpv / total_mpv if total_mpv.positive?
+
+          sheet.add_row [date, studio.name, platform.name, territory.name,
+                         share_of_mpv, total_mpv,
+                         studio_spots_count, all_week_spots_count, sov,
+                         matf_studio_spots_count, matf_spots_count, matf_sov,
+                         tatf_studio_spots_count, tatf_spots_count, tatf_sov]
+
+          row_index += 1
+        end
+      end
+    end
+  end
+
+  sheet.col_style 3, studios, row_offset: 1
+  sheet.col_style 4, percent, row_offset: 1
+  sheet.col_style 8, percent, row_offset: 1
+  sheet.col_style 11, percent, row_offset: 1
+  sheet.col_style 14, percent, row_offset: 1
+end
+
+columns = ['Scrape Date', 'Title', 'Platform', 'Region', 'Page Name', 'Number of Spots in Section',
+           'Row', 'Column', 'Medium ATF', 'True ATF', 'MPV', 'Screenshot']
+
+@report.studios.each do |studio|
+  wb.add_worksheet(name: studio.name) do |sheet|
+    sheet.sheet_view.show_grid_lines = true
+
+    header = sheet.styles.add_style(b: true, border: Axlsx::STYLE_THIN_BORDER)
+    sheet.add_row columns, style: header
+    @report.spots.select { |s| s.publications.map(&:studio_id).include?(studio.id) }.each_with_index do |s, i|
+      screenshot_url = s.screenshot.present? ? Rails.application.routes.url_helpers.url_for(s.screenshot) : nil
+      sheet.add_row [I18n.l(s.scraped_at, format: :long), s.name, s.platform.name, s.territory.name,
+                     [s.page.name, s.section.name].join(' / '), s.section.spots_count, s.row, s.column,
+                     (s.medium_atf ? 1 : 0), (s.true_atf ? 1 : 0), s.mpv, screenshot_url],
+                    style: Axlsx::STYLE_THIN_BORDER
+
+      if sheet.rows.last.cells.last.value.present?
+        sheet.add_hyperlink location: screenshot_url, ref: sheet.rows.last.cells.last
+      end
+
+      GC.start if (i % 300).zero? # force garbage collection
+    end
+  end
+end

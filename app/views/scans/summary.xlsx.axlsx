@@ -1,0 +1,46 @@
+# frozen_string_literal: true
+
+wb = xlsx_package.workbook
+
+columns = %w[Row Column App]
+
+wb.add_worksheet(name: 'Spots (apps)') do |sheet|
+  bold = sheet.styles.add_style(b: true)
+  sheet.add_row columns, style: bold
+
+  spots = Spot.joins(publications: :studio, section: :page).where(pages: { scan_id: @scans })
+  app_spots = spots.where(studios: { distributor_type: 'app' })
+  app_spots.each do |spot|
+    app = spot.app
+
+    sheet.add_row [spot.row, spot.column, app.name]
+  end
+end
+
+columns = %w[Row Column Publisher]
+
+wb.add_worksheet(name: 'Spots (publishers)') do |sheet|
+  bold = sheet.styles.add_style(b: true)
+  sheet.add_row columns, style: bold
+
+  spots = Spot.joins(publications: :studio, section: :page).where(pages: { scan_id: @scans })
+  publisher_spots = spots.where(studios: { distributor_type: 'studio' })
+  publisher_spots.each do |spot|
+    publisher = spot.studio
+
+    sheet.add_row [spot.row, spot.column, publisher.name]
+  end
+end
+
+columns = ['Row', 'Section Spots', 'Count']
+
+wb.add_worksheet(name: 'Sections') do |sheet|
+  bold = sheet.styles.add_style(b: true)
+  sheet.add_row columns, style: bold
+
+  sections = Section.joins(:page).where(pages: { scan_id: @scans }).order(:page_id, :position)
+
+  sections.each do |section|
+    sheet.add_row [section.position, [section.page.name, section.name].join(' / '), section.spots_count]
+  end
+end
